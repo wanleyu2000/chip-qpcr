@@ -1,0 +1,4 @@
+interface:
+  display_name: "ChIP-qPCR Analysis"
+  short_description: "Analyze ChIP-qPCR Ct data and report percent input"
+  default_prompt: "Use $chip-qpcr to analyze my ChIP-qPCR Ct export and generate an auditable percent-input report."
