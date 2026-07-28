@@ -1,4 +1,4 @@
 interface:
-  display_name: "ChIP-qPCR Analysis"
-  short_description: "Analyze ChIP-qPCR Ct data and report percent input"
-  default_prompt: "Use $chip-qpcr to analyze my ChIP-qPCR Ct export and generate an auditable percent-input report."
+  display_name: "ChIP-qPCR Site Designer"
+  short_description: "Predict TF promoter sites and analyze ChIP-qPCR"
+  default_prompt: "Use $chip-qpcr to find the top two JASPAR motif candidates for my protein and gene, then prepare ChIP-qPCR validation outputs."

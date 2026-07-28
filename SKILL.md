@@ -1,68 +1,54 @@
 ---
 name: chip-qpcr
-description: Analyze ChIP-qPCR Ct/Cq exports with the percent-input method, including input-dilution correction, technical-replicate aggregation, instrument-flag auditing, outlier-aware summaries, plots, and Prism-ready tables. Use when Codex receives ChIP-qPCR Excel/CSV results, needs to calculate or verify percent input, compare IP/IgG/control groups, troubleshoot plate layouts or QC flags, or produce reproducible analysis deliverables.
+description: Design and analyze ChIP-qPCR experiments. Use when Codex needs to turn a transcription factor/protein and gene symbol into JASPAR PWM motif candidates, download a strand-aware promoter sequence, score both strands at a user-selected JASPAR relative-score threshold, select the top two candidate binding sites, produce sequence/coordinate tables and promoter schematics, design ChIP-qPCR validation targets, or calculate auditable ChIP-qPCR percent input from Ct/Cq exports.
 ---
 
-# ChIP-qPCR analysis
+# ChIP-qPCR candidate design and analysis
 
-Analyze results reproducibly and preserve an audit trail. Treat instrument flags as review signals, not automatic biological conclusions.
+Use the candidate-design workflow before wet-lab ChIP-qPCR whenever the user provides a protein/TF and a gene. Keep computational prediction separate from evidence of in vivo occupancy.
 
-## Workflow
+## Protein + gene workflow
 
-1. Inspect the source without modifying it. Identify the results sheet, well, sample, target, Ct/Cq, omit, and QC-flag columns.
-2. Confirm the experimental mapping:
-   - Input sample label.
-   - IP, IgG, and other comparison labels.
-   - Input fraction saved before any additional dilution.
-   - Additional dilution applied to the input aliquot before qPCR.
-   - Biological replicate identifier and technical-replicate layout.
-3. If any of these materially affect the result and cannot be inferred safely, ask the user. Never silently assume 1%, 2%, or 10% input.
-4. Run `scripts/analyze_chip_qpcr.py` for standard plate exports. Use `--help` to inspect all options.
-5. Review the generated well audit before reporting the filtered result. Report exclusions with well IDs, flags, and the rule used.
-6. Verify the formula and at least one replicate manually:
+1. Confirm species, gene symbol, protein/TF name, genome assembly, promoter window, and JASPAR relative-score threshold. Default to human, GRCh38, canonical-transcript promoter `-2000/+500 bp`, and threshold `0.85` only when the user has not specified them.
+2. Run the bundled script. It queries JASPAR, resolves the gene/canonical transcript and sequence through Ensembl REST, scans both strands, and ranks hits.
 
-   `adjusted_input_Ct = mean_input_Ct - log2(1 / effective_input_fraction)`
+```bash
+python scripts/design_chip_qpcr_candidates.py HES1 SYT7 \
+  --species human --threshold 0.85 --output-dir chip_qpcr_candidates
+```
 
-   `%Input = 100 × 2^(adjusted_input_Ct - mean_IP_Ct)`
+3. Inspect `motif_selection.json`. Use only exact case-insensitive JASPAR-name matches. If there are multiple exact matrices, default to the highest matrix version and disclose the selected ID; use `--matrix-id` when the user specifies one. If no exact matrix exists, stop and ask for an approved matrix or TF alias—do not substitute a related protein silently.
+4. Treat `relative_score` as a normalized PWM match score, **not a probability of protein binding**. Higher thresholds reduce false-positive sequence matches but can miss degenerate sites.
+5. Use the top two non-overlapping hits in `top_two_sites.tsv` as motif-based candidates. Report their motif-oriented sequences, genomic/BED coordinates, TSS-relative positions, strand, matrix ID/version, and threshold.
+6. Open `promoter_schematic.svg` to check that the TSS, gene direction, all hits, and highlighted top two hits are coherent. Deliver it with `candidate_report.md`, `all_hits.tsv`, and `top_two_sites.tsv`.
+7. Suggest qPCR amplicons that centre on each site where feasible (typically 70–150 bp), plus a motif-negative control locus. Primer design, uniqueness, repeat masking, and genome build/assembly verification remain separate validation steps.
 
-   `effective_input_fraction = saved_input_fraction / additional_dilution`
+## Outputs
 
-7. Summarize biological replicate values with mean, sample SD, SEM, and `n`. Do not treat technical wells as independent biological replicates.
-8. State limitations: percent input is enrichment, not proof of direct binding; primer efficiency, specificity, chromatin quality, antibody quality, and background controls affect interpretation.
+The candidate script creates only a new output directory:
 
-## Standard command
+- `candidate_report.md`: methods, source URLs, selected motif, and caveats.
+- `motif_selection.json`: all exact JASPAR matrix candidates and the selected version.
+- `promoter.fasta`: transcription-oriented promoter sequence, with precise interval metadata.
+- `all_hits.tsv` and `all_hits.bed`: every threshold-passing scan result.
+- `top_two_sites.tsv` and `top_two_sites.bed`: ranked non-overlapping motif candidates.
+- `promoter_schematic.svg`: publication-ready, editable promoter diagram.
+
+Read [references/candidate-design.md](references/candidate-design.md) for the coordinate model, threshold interpretation, and troubleshooting API identifiers.
+
+## ChIP-qPCR Ct analysis
+
+After obtaining Ct/Cq results, use `scripts/analyze_chip_qpcr.py` to compute percent input with the correct input-fraction and dilution correction. Read [references/input-schema.md](references/input-schema.md) for expected columns and QC rules.
 
 ```bash
 python scripts/analyze_chip_qpcr.py run.xlsx \
-  --input-label input \
-  --input-percent 2 \
-  --additional-dilution 10 \
-  --exclude-flag OUTLIERRG \
-  --output-dir chip_qpcr_results
+  --input-label input --input-percent 2 --additional-dilution 10 \
+  --exclude-flag OUTLIERRG --output-dir chip_qpcr_results
 ```
 
-The script reads `.xlsx` or `.csv`, auto-detects common QuantStudio-style headers, groups wells by plate row by default, and writes:
+## Interpretation guardrails
 
-- `chip_qpcr_analysis.xlsx`: summary, replicate calculations, well-level audit, and Prism-ready data.
-- `chip_qpcr_summary.csv`: compact group statistics.
-- `chip_qpcr_plot.png`: individual biological replicate points with mean ± SD.
-
-For a tidy CSV, provide columns equivalent to `Well Position`, `Sample Name`, `Target Name`, and `CT`. Use `--replicate-regex` when the replicate ID is encoded in the well or sample name instead of the plate row.
-
-## QC and interpretation rules
-
-- Exclude wells explicitly marked by the instrument/user omit column.
-- Exclude only flags named with `--exclude-flag`; keep all flagged wells in the audit.
-- Prefer predeclared rules. If exploring exclusions after seeing the data, show both all-well and filtered analyses.
-- Investigate technical replicate spread, non-amplification, multi-peak melt curves, implausible Ct, and inconsistent input Ct before aggregation.
-- Keep IgG and positive/negative loci as separate sample groups; never merge them into the target IP.
-- Use sample SD (`n-1`) for biological replicates. Leave SD/SEM blank when `n < 2`.
-- Do not invent significance tests. Paired biological designs require paired tests; multiple loci/groups require an explicit multiplicity plan.
-
-## Nonstandard inputs
-
-Read [references/input-schema.md](references/input-schema.md) when column detection fails or the plate layout is not row-based. Normalize a copy to the documented tidy schema, then run the script on that copy. Preserve the original file unchanged.
-
-## Dependencies
-
-Require Python 3.10+, `openpyxl`, and `matplotlib`. If a dependency is unavailable, explain the missing package and provide the exact installation command; do not alter the user's environment without permission.
+- A motif hit is a sequence hypothesis, not a binding probability or ChIP-positive result.
+- Do not call occupancy without biological evidence; include IgG/input controls and biological replication.
+- Preserve JASPAR matrix version, Ensembl assembly, promoter definition, timestamp, threshold, and every exclusion in the final report.
+- Do not mix human and mouse coordinates or use a gene-level TSS when a transcript-specific design is required.
